@@ -1,6 +1,7 @@
 import os
 import sys
 from servidor import start_sync_service
+from cliente import watch_folder
 
 def main():
     # El usuario debe escribir: python sincronizacion.py <ruta_de_la_carpeta>
@@ -15,6 +16,7 @@ def main():
         os.makedirs(sync_folder)  # Crea la carpeta especificada.
 
     start_sync_service(sync_folder)
+    watch_folder(sync_folder)
 
 if __name__ == "__main__":
     main()
