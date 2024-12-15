@@ -12,7 +12,7 @@ Para probar el código de sincronización de carpetas en dos laptops utilizando 
 1. **Empareja ambas laptops** a través de Bluetooth a nivel de sistema operativo.
 2. **Obtén las direcciones MAC** de ambas laptops.
 3. **Navega por la consola** a la carpeta del proyecto.
-4. **Ejecuta el comando** `python syncronizacion.py`.
+4. **Ejecuta el comando** `python sincronizacion.py`.
 5. Rellena los campos superiores en la ventana con el nombre de la **carpeta de sincronización** (deben tener el mismo nombre en ambas laptops, en caso de no existir serán creadas), las **MAC** y los **puertos**.
 6. Presiona el botón **Iniciar monitoreo** y cierra la ventana emergente
 
