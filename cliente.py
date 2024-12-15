@@ -1,58 +1,94 @@
 import socket
 import os
 import time
+import tkinter as tk
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
-# Dirección del dispositivo Bluetooth del peer al que se desea conectar
-peer_addr = "B4:8C:9D:D4:8E:BA"
-# Puerto de comunicación Bluetooth
-port = 30
-
-def send_file(filename, filedata, peer_addr, port):
+def send_file(filename, filedata, peer_addr, peer_port, action="CREATE"):
     try:
-        # establece un canal de comunicación mediante Bluetooth utilizando el protocolo RFCOMM
-        # (Radio Frequency Communication)
         with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
-            # Conectar al dispositivo Bluetooth con la dirección y puerto especificados
-            sock.connect((peer_addr, port))
-            # Enviar el nombre del archivo y sus datos concatenados y codificados en bytes
-            sock.send(f"{filename}::{filedata}".encode())
+            sock.connect((peer_addr, peer_port))
+            # Enviar datos en formato binario
+            sock.send(f"{action}::{filename}::".encode() + filedata)
     except Exception as e:
-        # Imprimir un mensaje de error en caso de que ocurra una excepción
         print(f"Error al enviar {filename}: {e}")
 
-def watch_folder(sync_folder):
-    # Obtener el conjunto inicial de archivos en la carpeta de sincronización
-    watched_files = set(os.listdir(sync_folder))
-    
-    while True:
-        # Obtener el conjunto actual de archivos en la carpeta de sincronización
-        current_files = set(os.listdir(sync_folder))
-        # Determinar los nuevos archivos agregados
-        new_files = current_files - watched_files
+def delete_file(filename, peer_addr, peer_port):
+    try:
+        with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
+            sock.connect((peer_addr, peer_port))
+            sock.send(f"DELETE::{filename}".encode())
+    except Exception as e:
+        print(f"Error al eliminar {filename}: {e}")
 
-        # Filtrar archivos temporales y añadir un retraso
-        time.sleep(1)
-        current_files = set(os.listdir(sync_folder))
-        new_files = current_files - watched_files
+def rename_file(old_filename, new_filename, peer_addr, peer_port):
+    try:
+        with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
+            sock.connect((peer_addr, peer_port))
+            sock.send(f"RENAME::{old_filename}::{new_filename}".encode())
+    except Exception as e:
+        print(f"Error al renombrar {old_filename}: {e}")
 
-        for file in new_files:
-            # Ignorar archivos temporales que empiezan con "~$" o terminan en ".tmp"
-            if file.startswith("~$") or file.endswith(".tmp"):
-                continue  # Continuar con el siguiente archivo
+class FileHandler(FileSystemEventHandler):
+    def __init__(self, sync_folder, peer_addr, peer_port, listbox):
+        self.sync_folder = sync_folder
+        self.peer_addr = peer_addr
+        self.peer_port = peer_port
+        self.listbox = listbox
+        self.last_event = None  # Modificado para un manejo adecuado de eventos duplicados
 
-            try:
-                # Leer el contenido del nuevo archivo
-                with open(os.path.join(sync_folder, file), 'r') as f:
-                    filedata = f.read()
-                # Enviar el archivo a una dirección de par y puerto especificados
-                send_file(file, filedata, peer_addr, port)
-                print(f"Archivo enviado: {file}")
-            except PermissionError as e:
-                # Manejar errores de permisos al acceder al archivo
-                print(f"Error de permisos al acceder al archivo {file}: {e}")
-            except Exception as e:
-                # Manejar cualquier otro error al acceder al archivo
-                print(f"Error al acceder al archivo {file}: {e}")
+    def on_created(self, event):
+        if event.is_directory:
+            return
+        self.process_event(event, "CREATE")
 
-        # Actualizar el conjunto de archivos observados
-        watched_files = current_files
+    def on_deleted(self, event):
+        if event.is_directory:
+            return
+        self.process_event(event, "DELETE")
+
+    def on_modified(self, event):
+        if event.is_directory or (self.last_event and self.last_event.src_path == event.src_path):
+            return
+        self.process_event(event, "MODIFY")  # Aseguramos el procesamiento del evento de modificación
+
+    def on_moved(self, event):
+        if event.is_directory:
+            return
+        old_filename = os.path.relpath(event.src_path, self.sync_folder)
+        new_filename = os.path.relpath(event.dest_path, self.sync_folder)
+        rename_file(old_filename, new_filename, self.peer_addr, self.peer_port)
+        self.update_listbox()
+
+    def process_event(self, event, event_type):
+        self.last_event = event
+        filepath = event.src_path
+        filename = os.path.relpath(filepath, self.sync_folder)
+        if event_type in ["CREATE", "MODIFY"]:
+            with open(filepath, 'rb') as f:  # Aseguramos la lectura en binario
+                filedata = f.read()
+            send_file(filename, filedata, self.peer_addr, self.peer_port, action=event_type)
+            if event_type == "MODIFY":
+                print(f"Archivo {filename} modificado y enviado.")  # Notificación de modificación
+        elif event_type == "DELETE":
+            delete_file(filename, self.peer_addr, self.peer_port)
+        self.update_listbox()
+
+    def update_listbox(self):
+        current_files = os.listdir(self.sync_folder)
+        self.listbox.delete(0, tk.END)
+        self.listbox.insert(tk.END, *current_files)
+
+def watch_folder(sync_folder, listbox, peer_addr, peer_port):
+    event_handler = FileHandler(sync_folder, peer_addr, peer_port, listbox)
+    observer = Observer()
+    observer.schedule(event_handler, sync_folder, recursive=False)
+    observer.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
